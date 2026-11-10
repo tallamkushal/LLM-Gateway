@@ -12,7 +12,7 @@ router = APIRouter(tags=["generation"])
 
 @lru_cache(maxsize=1)
 def get_generation_service() -> GenerationService:
-    """Create the service once and reuse its OpenAI client."""
+    """Create the service once and reuse its provider client."""
     return GenerationService()
 
 

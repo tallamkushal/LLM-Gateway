@@ -1,9 +1,22 @@
 import os
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 
-from app.providers.base_provider import BaseProvider, ProviderResult
+from app.providers.base_provider import (
+    BaseProvider,
+    ProviderConfigurationError,
+    ProviderRateLimitError,
+    ProviderResult,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
 
 
 class OpenAIProvider(BaseProvider):
@@ -16,19 +29,56 @@ class OpenAIProvider(BaseProvider):
         load_dotenv()
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise RuntimeError("Set OPENAI_API_KEY in .env or your environment.")
+            raise ProviderConfigurationError(
+                "Set OPENAI_API_KEY in .env or your environment."
+            )
         self.client = OpenAI(api_key=api_key)
 
     def generate(
-        self, prompt: str, model: str, max_tokens: int, temperature: float
+        self,
+        prompt: str,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        output_schema: dict[str, object] | None = None,
     ) -> ProviderResult:
         """Send the prompt to OpenAI and return its answer and usage."""
-        response = self.client.responses.create(
-            model=model,
-            input=prompt,
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
+        try:
+            request_parameters: dict[str, object] = {
+                "model": model,
+                "input": prompt,
+                "max_output_tokens": max_tokens,
+                "temperature": temperature,
+            }
+
+            if output_schema is not None:
+                request_parameters["text"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "output",
+                        "strict": True,
+                        "schema": output_schema,
+                    }
+                }
+
+            response = self.client.responses.create(**request_parameters)
+        except APITimeoutError as error:
+            raise ProviderTimeoutError(
+                "The LLM provider request timed out."
+            ) from error
+        except RateLimitError as error:
+            raise ProviderRateLimitError(
+                "The LLM provider rate limit was reached."
+            ) from error
+        except APIConnectionError as error:
+            raise ProviderUnavailableError(
+                "The LLM provider could not be reached."
+            ) from error
+        except APIError as error:
+            raise ProviderUnavailableError(
+                "The LLM provider request failed."
+            ) from error
+
         usage = response.usage
 
         return ProviderResult(
